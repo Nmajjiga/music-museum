@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Kafka Cluster
+  zookeeper:
+    image: bitnami/zookeeper:3.8
+    ports:
+      - "2181:2181"
+    environment:
+      - ALLOW_ANONYMOUS_LOGIN=yes
+
+  kafka:
+    image: bitnami/kafka:3.3
+    ports:
+      - "9092:9092"
+      - "9093:9093"
+    environment:
+      - KAFKA_BROKER_ID=1
+      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+      - ALLOW_PLAINTEXT_LISTENER=yes
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+      - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:9092,EXTERNAL://localhost:9093
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
+    depends_on:
+      - zookeeper
+
+  # Application Services
+  music-service:
+    build: ./music_service
+    ports:
+      - "5000:5000"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - API_KEYS=${MUSIC_API_KEYS}
+      - DATA_PATH=/app/data/all.json
+    depends_on:
+      - kafka
+    volumes:
+      - ./music_service/data:/app/data
+
+  stats-service:
+    build: ./stats_service
+    ports:
+      - "5001:5001"
+    environment:
+      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
+      - ADMIN_API_KEY=${ADMIN_API_KEY}
+    depends_on:
+      - kafka
+
+  streamlit-dashboard:
+    build: ./streamlit_dashboard
+    ports:
+      - "8501:8501"
+    environment:
+      - MUSIC_SERVICE_URL=http://music-service:5000
+      - STATS_SERVICE_URL=http://stats-service:5001
+    depends_on:
+      - music-service
+      - stats-service
