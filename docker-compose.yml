@@ -1,61 +1,100 @@
 version: '3.8'
 
 services:
+  # Database for authentication
+  auth-db:
+    image: postgres:15
+    container_name: auth-db
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: authpass
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   # Kafka Cluster
   zookeeper:
-    image: bitnami/zookeeper:3.8
+    image: confluentinc/cp-zookeeper:7.3.0
+    container_name: zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
 
   kafka:
-    image: bitnami/kafka:3.3
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka
+    depends_on:
+      - zookeeper
     ports:
       - "9092:9092"
       - "9093:9093"
     environment:
-      - KAFKA_BROKER_ID=1
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
-      - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
-      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka:9092,EXTERNAL://localhost:9093
-      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=CLIENT
-    depends_on:
-      - zookeeper
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
 
-  # Application Services
+  # Authentication Service (NEW)
+  auth-service:
+    build: ./auth_service
+    container_name: auth-service
+    ports:
+      - "5002:5002"
+    environment:
+      DATABASE_URL: postgresql://authuser:authpass@auth-db:5432/authdb
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    depends_on:
+      - auth-db
+
+  # Music Service
   music-service:
     build: ./music_service
+    container_name: music-service
     ports:
       - "5000:5000"
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - API_KEYS=${MUSIC_API_KEYS}
-      - DATA_PATH=/app/data/all.json
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SERVICE_URL: http://auth-service:5002
     depends_on:
       - kafka
+      - auth-service
     volumes:
       - ./music_service/data:/app/data
 
+  # Statistics Service
   stats-service:
     build: ./stats_service
+    container_name: stats-service
     ports:
       - "5001:5001"
     environment:
-      - KAFKA_BOOTSTRAP_SERVERS=kafka:9092
-      - ADMIN_API_KEY=${ADMIN_API_KEY}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      AUTH_SERVICE_URL: http://auth-service:5002
     depends_on:
       - kafka
+      - auth-service
 
-  streamlit-dashboard:
-    build: ./streamlit_dashboard
+  # Streamlit Dashboard with Auth (UPDATED)
+  dashboard:
+    build: ./dashboard
+    container_name: dashboard
     ports:
       - "8501:8501"
     environment:
-      - MUSIC_SERVICE_URL=http://music-service:5000
-      - STATS_SERVICE_URL=http://stats-service:5001
+      MUSIC_SERVICE_URL: http://music-service:5000
+      STATS_SERVICE_URL: http://stats-service:5001
+      AUTH_SERVICE_URL: http://auth-service:5002
     depends_on:
       - music-service
       - stats-service
+      - auth-service
+
+volumes:
+  auth_db_data:

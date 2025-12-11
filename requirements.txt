@@ -1,0 +1,15 @@
+flask
+kafka-python
+streamlit
+requests
+plotly
+python-dotenv
+configparser
+pyjwt
+flask-sqlalchemy
+werkzeug
+psycopg2-binary
+black
+flake8
+pytest
+pymongo
