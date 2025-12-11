@@ -1,100 +1,153 @@
 version: '3.8'
 
 services:
-  # Database for authentication
-  auth-db:
-    image: postgres:15
-    container_name: auth-db
-    environment:
-      POSTGRES_DB: authdb
-      POSTGRES_USER: authuser
-      POSTGRES_PASSWORD: authpass
-    volumes:
-      - auth_db_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-
-  # Kafka Cluster
+  # Kafka & Zookeeper (if not using external Kafka)
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
     container_name: zookeeper
+    restart: unless-stopped
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-    ports:
-      - "2181:2181"
+    healthcheck:
+      test: ["CMD", "bash", "-c", "echo 'ruok' | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   kafka:
     image: confluentinc/cp-kafka:7.3.0
     container_name: kafka
+    restart: unless-stopped
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
-      - "9093:9093"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_INTERNAL://broker:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+    healthcheck:
+      test: ["CMD", "kafka-topics", "--bootstrap-server", "localhost:9092", "--list"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Authentication Service (NEW)
+  # PostgreSQL for authentication
+  auth-db:
+    image: postgres:15-alpine
+    container_name: auth-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authdb
+      POSTGRES_USER: authuser
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-authpass123}
+    volumes:
+      - auth_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # Authentication Service
   auth-service:
     build: ./auth_service
     container_name: auth-service
-    ports:
-      - "5002:5002"
-    environment:
-      DATABASE_URL: postgresql://authuser:authpass@auth-db:5432/authdb
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY}
+    restart: unless-stopped
     depends_on:
-      - auth-db
+      auth-db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql://authuser:${POSTGRES_PASSWORD:-authpass123}@auth-db:5432/authdb
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-your-super-secret-jwt-key-change-this}
+      FLASK_ENV: production
+    expose:
+      - "5002"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Music Service
   music-service:
     build: ./music_service
     container_name: music-service
-    ports:
-      - "5000:5000"
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
     environment:
+      MONGODB_URI: ${MONGODB_URI}
+      MONGODB_DB: BillboardSongs
+      MONGODB_COLLECTION: Songs
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTH_SERVICE_URL: http://auth-service:5002
-    depends_on:
-      - kafka
-      - auth-service
-    volumes:
-      - ./music_service/data:/app/data
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-secret-key-123}
+      FLASK_ENV: production
+    expose:
+      - "5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   # Statistics Service
   stats-service:
     build: ./stats_service
     container_name: stats-service
-    ports:
-      - "5001:5001"
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       AUTH_SERVICE_URL: http://auth-service:5002
-    depends_on:
-      - kafka
-      - auth-service
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-secret-key-123}
+      FLASK_ENV: production
+    expose:
+      - "5001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # Streamlit Dashboard with Auth (UPDATED)
+  # Streamlit Dashboard
   dashboard:
     build: ./dashboard
     container_name: dashboard
-    ports:
-      - "8501:8501"
+    restart: unless-stopped
+    depends_on:
+      music-service:
+        condition: service_healthy
+      stats-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
     environment:
       MUSIC_SERVICE_URL: http://music-service:5000
       STATS_SERVICE_URL: http://stats-service:5001
       AUTH_SERVICE_URL: http://auth-service:5002
-    depends_on:
-      - music-service
-      - stats-service
-      - auth-service
+      API_KEY: music-api-key-1
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-admin-secret-key-123}
+    ports:
+      - "8501:8501"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   auth_db_data:
