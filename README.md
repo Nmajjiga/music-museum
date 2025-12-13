@@ -9,7 +9,6 @@ Main Page: https://seahorse-app-w2aim.ondigitalocean.app/
 - Auth (health): https://clownfish-app-942hv.ondigitalocean.app/health
 - Stats (health): https://sea-lion-app-45emv.ondigitalocean.app/health
 - Music (health): https://goldfish-app-r8rzo.ondigitalocean.app/health
-- Dashboard (health): https://seahorse-app-w2aim.ondigitalocean.app/health
 
 ### Installation - Docker
 Since this is all containerized with docker, it is much more convenient to utilize it so all the services can run. You can install docker desktop (for windows) or basic docker (using linux) provided the steps using the link here: https://docs.docker.com/engine/install/ 
