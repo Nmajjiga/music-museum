@@ -9,7 +9,7 @@ STEPS:
 - With docker installed and docker desktop open, create the following docker-compose.yml file here:
 
 docker-compose.prod.yml:
-version: '3.8'
+''' version: '3.8'
 
 services:
   auth-service:
@@ -76,7 +76,7 @@ services:
 
 networks:
   music-network:
-    driver: bridge
+    driver: bridge '''
 
 - #### Create directory: mkdir music-museum && cd music-museum
 - #### Create docker-compose.prod.yml (copy content from above): nano docker-compose.prod.yml
