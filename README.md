@@ -16,83 +16,122 @@ Since this is all containerized with docker, it is much more convenient to utili
 
 STEPS:
 - With docker installed and docker desktop open, create the following docker-compose.yml file here:
+  # Music Museum - Complete Local Development Stack
 
-docker-compose.yml:
-''' 
+```yaml
+# Music Museum - Complete Local Development Stack
+# All services in one docker-compose file
+# Build: docker-compose build
+# Run:   docker-compose up -d
+# Stop:  docker-compose down
+# Check logs: docker-compose logs -f [service-name]
+
 version: '3.8'
 
 services:
   auth-service:
-    image: nmajjiga/music-museum-auth:latest
+    build: ./auth_service
     container_name: music-museum-auth
     ports:
-      - "5002:5002"
+      - "5002:5002"  # External: 5002, Internal: 5002
     environment:
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-"music-museum-secure-key-2025-change-in-production"}
+      JWT_SECRET_KEY: "music-museum-secure-key-2025-change-in-production"
       FLASK_ENV: "production"
+      PORT: 5002
     restart: unless-stopped
     networks:
       - music-network
-
-  music-service:
-    image: nmajjiga/music-museum-music:latest
-    container_name: music-museum-music
-    ports:
-      - "5000:5000"
-    environment:
-      STATS_SERVICE_URL: http://stats-service:5001
-      AUTH_SERVICE_URL: http://auth-service:5002
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-"music-museum-secure-key-2025-change-in-production"}
-      FLASK_ENV: "production"
-    depends_on:
-      - stats-service
-      - auth-service
-    restart: unless-stopped
-    networks:
-      - music-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   stats-service:
-    image: nmajjiga/music-museum-stats:latest
+    build: ./stats_service
     container_name: music-museum-stats
     ports:
-      - "5001:5001"
+      - "5001:5001"  # External: 5001, Internal: 5001
     environment:
-      AUTH_SERVICE_URL: http://auth-service:5002
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-"music-museum-secure-key-2025-change-in-production"}
+      AUTH_SERVICE_URL: "http://auth-service:5002"  # Uses Docker network hostname
+      JWT_SECRET_KEY: "music-museum-secure-key-2025-change-in-production"
       FLASK_ENV: "production"
+      PORT: 5001
     depends_on:
-      - auth-service
+      auth-service:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - music-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  music-service:
+    build: ./music_service
+    container_name: music-museum-music
+    ports:
+      - "5000:5000"  # External: 5000, Internal: 5000
+    environment:
+      STATS_SERVICE_URL: "http://stats-service:5001"  # Uses Docker network hostname
+      AUTH_SERVICE_URL: "http://auth-service:5002"    # Uses Docker network hostname
+      JWT_SECRET_KEY: "music-museum-secure-key-2025-change-in-production"
+      FLASK_ENV: "production"
+      PORT: 5000
+    depends_on:
+      stats-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - music-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   dashboard:
-    image: nmajjiga/music-museum-dashboard:latest
+    build: ./dashboard
     container_name: music-museum-dashboard
     ports:
-      - "8501:8501"
+      - "8501:8501"  # Streamlit dashboard
+      - "8080:8080"  # Health check endpoint (for cloud deployments)
     environment:
-      MUSIC_SERVICE_URL: http://music-service:5000
-      STATS_SERVICE_URL: http://stats-service:5001
-      AUTH_SERVICE_URL: http://auth-service:5002
-      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-"music-museum-secure-key-2025-change-in-production"}
+      MUSIC_SERVICE_URL: "http://music-service:5000"  
+      STATS_SERVICE_URL: "http://stats-service:5001"  
+      AUTH_SERVICE_URL: "http://auth-service:5002"    
+      JWT_SECRET_KEY: "music-museum-secure-key-2025-change-in-production"
+      PORT: 8501
     depends_on:
-      - music-service
-      - stats-service
-      - auth-service
+      music-service:
+        condition: service_healthy
+      stats-service:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - music-network
-
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 60s  
 networks:
   music-network:
-    driver: bridge 
-'''
-
-- #### Create directory: mkdir music-museum && cd music-museum
-- #### Create docker-compose.prod.yml (copy content from above): nano docker-compose.prod.yml
-- #### Set environment variables (optional, for production): export JWT_SECRET_KEY="your-secure-production-key"
-- #### Deploy everything: docker-compose up -d
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+```
 - #### Check status: docker-compose -f docker-compose.prod.yml ps
 - #### View logs: docker-compose -f docker-compose.prod.yml logs -f
 
