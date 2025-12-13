@@ -8,7 +8,7 @@ Since this is all containerized with docker, it is much more convenient to utili
 STEPS:
 - With docker installed and docker desktop open, create the following docker-compose.yml file here:
   
-docker-compose.prod.yml:
+'docker-compose.prod.yml:
   version: '3.8'
   
   services:
@@ -76,7 +76,7 @@ docker-compose.prod.yml:
   
   networks:
     music-network:
-      driver: bridge
+      driver: bridge'
 
 - After this is created, you can just type the command 'docker-compose up -d' so that it can be running in the background of the program provided and open it using 'localhost:8501'
 
