@@ -2,6 +2,15 @@
 
 This is a cloud based application that is able to show a history of top 100 songs from 1958 to 2025 based on accessibility to the billboard chart data This will utilize the techniques from class such as rest APIs, individual microservices and also docker to deploy this on my preferred cloud base digitalocean. The data is loaded in from a raw file called all.json from the github repository which is continuously being updated every single day which makes updating the application easier. The goal of my microservice is to analyze 65+ years of Billboard chart data (1958–2025) to identify the top 100 most popular songs. I chose this project because of the convenience of utilizing key microservices patterns to be able to create services for the songs, and stats of each song using a concurrently updating JSON file.
 
+## View - DigitalOcean
+Feel free to view the applications deployed on DigitalOcean using the links here:
+Main Page: https://seahorse-app-w2aim.ondigitalocean.app/ 
+
+- Auth (health): https://clownfish-app-942hv.ondigitalocean.app/health
+- Stats (health): https://sea-lion-app-45emv.ondigitalocean.app/health
+- Music (health): https://goldfish-app-r8rzo.ondigitalocean.app/health
+- Dashboard (health): https://seahorse-app-w2aim.ondigitalocean.app/health
+
 ### Installation - Docker
 Since this is all containerized with docker, it is much more convenient to utilize it so all the services can run. You can install docker desktop (for windows) or basic docker (using linux) provided the steps using the link here: https://docs.docker.com/engine/install/ 
 
