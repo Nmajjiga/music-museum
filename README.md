@@ -17,7 +17,7 @@ Since this is all containerized with docker, it is much more convenient to utili
 STEPS:
 - With docker installed and docker desktop open, create the following docker-compose.yml file here:
 
-docker-compose.prod.yml:
+docker-compose.yml:
 ''' 
 version: '3.8'
 
@@ -92,7 +92,7 @@ networks:
 - #### Create directory: mkdir music-museum && cd music-museum
 - #### Create docker-compose.prod.yml (copy content from above): nano docker-compose.prod.yml
 - #### Set environment variables (optional, for production): export JWT_SECRET_KEY="your-secure-production-key"
-- #### Deploy everything: docker-compose -f docker-compose.prod.yml up -d
+- #### Deploy everything: docker-compose up -d
 - #### Check status: docker-compose -f docker-compose.prod.yml ps
 - #### View logs: docker-compose -f docker-compose.prod.yml logs -f
 
