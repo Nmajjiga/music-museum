@@ -4,8 +4,9 @@ This is a cloud based application that is able to show a history of top 100 song
 
 ## View - DigitalOcean
 Feel free to view the applications deployed on DigitalOcean using the links here:
-Main Page: https://seahorse-app-w2aim.ondigitalocean.app/ 
+Main Dashboard Page: https://seahorse-app-w2aim.ondigitalocean.app/
 
+### Microservices:
 - Auth (health): https://clownfish-app-942hv.ondigitalocean.app/health
 - Stats (health): https://sea-lion-app-45emv.ondigitalocean.app/health
 - Music (health): https://goldfish-app-r8rzo.ondigitalocean.app/health
