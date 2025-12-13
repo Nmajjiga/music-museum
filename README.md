@@ -7,6 +7,7 @@ Since this is all containerized with docker, it is much more convenient to utili
 
 STEPS:
 - With docker installed and docker desktop open, create the following docker-compose.yml file here:
+  
 docker-compose.prod.yml:
   version: '3.8'
   
