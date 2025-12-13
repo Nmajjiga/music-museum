@@ -10,8 +10,7 @@ STEPS:
 
 docker-compose.prod.yml:
 
-    version: '3.8'
-  
+  version: '3.8' 
   services:
     auth-service:
       image: nmajjiga/music-museum:auth
