@@ -2,46 +2,18 @@ import streamlit as st
 import requests
 import pandas as pd
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
 import time
-import sys
 import os
 
-# Add parent directory to path to import config
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-# Try to read config, but use defaults if not available
-try:
-    import configparser
-    config = configparser.ConfigParser()
-    config.read('../config.ini')
-    
-    if config.has_section('dashboard'):
-        MUSIC_SERVICE_URL = config.get('dashboard', 'music_service_url', fallback='http://localhost:5000')
-        STATS_SERVICE_URL = config.get('dashboard', 'stats_service_url', fallback='http://localhost:5001')
-        AUTH_SERVICE_URL = config.get('dashboard', 'auth_service_url', fallback='http://localhost:5002')
-        API_KEY = config.get('dashboard', 'api_key', fallback='music-api-key-1')
-        ADMIN_API_KEY = config.get('dashboard', 'admin_api_key', fallback='admin-secret-key-123')
-    else:
-        MUSIC_SERVICE_URL = 'http://localhost:5000'
-        STATS_SERVICE_URL = 'http://localhost:5001'
-        AUTH_SERVICE_URL = 'http://localhost:5002'
-        API_KEY = 'music-api-key-1'
-        ADMIN_API_KEY = 'admin-secret-key-123'
-except:
-    # Use defaults if config fails
-    MUSIC_SERVICE_URL = 'http://localhost:5000'
-    STATS_SERVICE_URL = 'http://localhost:5001'
-    AUTH_SERVICE_URL = 'http://localhost:5002'
-    API_KEY = 'music-api-key-1'
-    ADMIN_API_KEY = 'admin-secret-key-123'
+# Configuration
+MUSIC_URL = os.getenv('MUSIC_SERVICE_URL', 'http://localhost:5000')
+STATS_URL = os.getenv('STATS_SERVICE_URL', 'http://localhost:5001')
+AUTH_URL = os.getenv('AUTH_SERVICE_URL', 'http://localhost:5002')
 
 st.set_page_config(
-    page_title="Music Museum",
-    page_icon="🎵",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Music Museum Dashboard",
+    page_icon="",
+    layout="wide"
 )
 
 # Initialize session state
@@ -53,63 +25,27 @@ if 'role' not in st.session_state:
     st.session_state.role = None
 if 'songs' not in st.session_state:
     st.session_state.songs = []
-if 'current_view' not in st.session_state:
-    st.session_state.current_view = 'overall'
-if 'current_year' not in st.session_state:
-    st.session_state.current_year = None
-if 'admin_api_key' not in st.session_state:
-    st.session_state.admin_api_key = ADMIN_API_KEY
-if 'service_status' not in st.session_state:
-    st.session_state.service_status = {
-        'music': False,
-        'stats': False,
-        'auth': False
-    }
+if 'century_data' not in st.session_state:
+    st.session_state.century_data = {'1900': [], '2000': []}
 
-# Helper function to check service availability
-def check_services():
-    """Check if all services are running"""
-    status = {
-        'music': False,
-        'stats': False,
-        'auth': False
-    }
-    
+def login(username, password):
+    """Authenticate user with auth service"""
     try:
-        response = requests.get(f"{MUSIC_SERVICE_URL}/health", timeout=3)
-        status['music'] = response.status_code == 200
+        response = requests.post(
+            f"{AUTH_URL}/auth/login",
+            json={'username': username, 'password': password},
+            timeout=5
+        )
+        if response.status_code == 200:
+            data = response.json()
+            st.session_state.token = data['token']
+            st.session_state.user = data['user']['username']
+            st.session_state.role = data['user']['role']
+            return True
+        else:
+            return False
     except:
-        status['music'] = False
-    
-    try:
-        response = requests.get(f"{STATS_SERVICE_URL}/health", timeout=3)
-        status['stats'] = response.status_code == 200
-    except:
-        status['stats'] = False
-    
-    try:
-        response = requests.get(f"{AUTH_SERVICE_URL}/health", timeout=3)
-        status['auth'] = response.status_code == 200
-    except:
-        status['auth'] = False
-    
-    st.session_state.service_status = status
-    return status
-
-# Simplified login function
-def simple_login(username, password):
-    """Simple login for testing without auth service"""
-    if username == 'admin' and password == 'admin123':
-        st.session_state.user = 'admin'
-        st.session_state.role = 'admin'
-        st.session_state.token = 'demo-token-admin'
-        return True
-    elif username == 'user' and password == 'user123':
-        st.session_state.user = 'user'
-        st.session_state.role = 'user'
-        st.session_state.token = 'demo-token-user'
-        return True
-    return False
+        return False
 
 def logout():
     """Logout user"""
@@ -117,537 +53,329 @@ def logout():
     st.session_state.user = None
     st.session_state.role = None
     st.session_state.songs = []
-    st.session_state.current_view = 'overall'
-    st.session_state.current_year = None
+    st.session_state.century_data = {'1900': [], '2000': []}
     st.rerun()
 
-def make_request(url, method='GET', data=None, requires_auth=True, use_admin_key=False):
-    """Make HTTP request with error handling"""
-    headers = {}
+def make_request(url, method='GET', params=None):
+    """Make HTTP request with auth token"""
+    if not st.session_state.token:
+        return None
     
-    if use_admin_key and st.session_state.admin_api_key:
-        headers['X-Admin-Key'] = st.session_state.admin_api_key
-    elif requires_auth and st.session_state.token:
-        headers['Authorization'] = f"Bearer {st.session_state.token}"
-    elif requires_auth and API_KEY:
-        headers['X-API-Key'] = API_KEY
-    
+    headers = {'Authorization': st.session_state.token}
     try:
         if method == 'GET':
-            response = requests.get(url, headers=headers, params=data, timeout=10)
+            response = requests.get(url, headers=headers, params=params, timeout=10)
         elif method == 'POST':
-            response = requests.post(url, headers=headers, json=data, timeout=10)
-        else:
-            return None
-        
+            response = requests.post(url, headers=headers, json=params, timeout=10)
         return response
-    except requests.exceptions.ConnectionError:
-        st.error(f"Cannot connect to service at {url}")
-        return None
-    except requests.exceptions.Timeout:
-        st.error(f"Request timed out for {url}")
-        return None
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(f"Connection error: {e}")
         return None
 
-def load_songs(view='overall', year=None):
-    """Load songs based on the current view"""
-    if view == 'overall':
-        url = f"{MUSIC_SERVICE_URL}/songs/top100"
-        response = make_request(url, requires_auth=False)
-    elif view in ['1900', '2000']:
-        url = f"{MUSIC_SERVICE_URL}/songs/century/{view}"
-        response = make_request(url, requires_auth=False)
-    elif view == 'year' and year:
-        url = f"{MUSIC_SERVICE_URL}/admin/songs/year/{year}"
-        response = make_request(url, use_admin_key=True)
-    else:
-        return False
-    
-    if response and response.status_code == 200:
-        data = response.json()
-        st.session_state.songs = data.get('songs', [])
-        return True
-    return False
+def check_services():
+    """Check service availability"""
+    services = {}
+    for service, url in [('music', MUSIC_URL), ('stats', STATS_URL), ('auth', AUTH_URL)]:
+        try:
+            resp = requests.get(f"{url}/health", timeout=3)
+            services[service] = resp.status_code == 200
+        except:
+            services[service] = False
+    return services
 
 # Login page
 if not st.session_state.token:
-    st.title("🎵 Music Museum Login")
-    st.markdown("---")
+    st.title("🎵 Music Museum Dashboard")
     
-    # Check services first
-    status = check_services()
+    services = check_services()
     
     col1, col2, col3 = st.columns([1, 2, 1])
-    
     with col2:
-        with st.container():
-            st.subheader("Login to Music Museum")
-            
-            # Service status indicator
-            st.markdown("### Service Status")
-            status_col1, status_col2, status_col3 = st.columns(3)
-            with status_col1:
-                st.metric("Music API", "✅" if status['music'] else "❌")
-            with status_col2:
-                st.metric("Stats API", "✅" if status['stats'] else "❌")
-            with status_col3:
-                st.metric("Auth API", "✅" if status['auth'] else "⚠️")
-            
-            if not status['music']:
-                st.warning("⚠️ Music service is not running. Please start it on port 5000.")
-            
-            st.markdown("---")
-            
-            username = st.text_input("Username", value="admin")
-            password = st.text_input("Password", type="password", value="admin123")
-            
-            col_a, col_b = st.columns(2)
-            with col_a:
-                if st.button("Login (Demo Mode)", type="primary", use_container_width=True):
-                    if simple_login(username, password):
-                        st.success("Logged in successfully!")
-                        time.sleep(1)
-                        st.rerun()
-                    else:
-                        st.error("Invalid credentials")
-            
-            with col_b:
-                if st.button("Try Auth Service", type="secondary", use_container_width=True):
-                    if status['auth']:
-                        try:
-                            response = requests.post(
-                                f"{AUTH_SERVICE_URL}/auth/login",
-                                json={'username': username, 'password': password},
-                                timeout=5
-                            )
-                            if response.status_code == 200:
-                                data = response.json()
-                                st.session_state.token = data['token']
-                                st.session_state.user = data['user']['username']
-                                st.session_state.role = data['user']['role']
-                                st.success("Logged in via Auth Service!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("Auth service login failed")
-                        except:
-                            st.error("Cannot connect to auth service")
-                    else:
-                        st.warning("Auth service not available")
-            
-            st.markdown("---")
-            st.markdown("#### Demo Accounts")
-            st.code("Admin: username=admin, password=admin123")
-            st.code("User: username=user, password=user123")
-            st.markdown("#### Admin Access:")
-            st.markdown("- Use admin API key: `admin-secret-key-123`")
-            st.markdown("- Admin endpoints require `X-Admin-Key` header")
+        st.subheader("Login")
+        
+        # Service status
+        st.write("**Service Status:**")
+        col_a, col_b, col_c = st.columns(3)
+        with col_a:
+            st.metric("Auth", "✅" if services['auth'] else "❌")
+        with col_b:
+            st.metric("Music", "✅" if services['music'] else "❌")
+        with col_c:
+            st.metric("Stats", "✅" if services['stats'] else "❌")
+        
+        if not services['auth']:
+            st.error("Auth service unavailable. Please start auth service on port 5002.")
+        
+        username = st.text_input("Username", value="admin")
+        password = st.text_input("Password", type="password", value="admin123")
+        
+        if st.button("Login", type="primary", use_container_width=True):
+            if login(username, password):
+                st.success(f"Welcome {st.session_state.user}!")
+                time.sleep(0.5)
+                st.rerun()
+            else:
+                st.error("Login failed. Check credentials and service status.")
+        
+        st.markdown("---")
+        st.markdown("**Demo Accounts:**")
+        st.code("Admin: admin / admin123")
+        st.code("User: user / user123")
+        st.markdown("*Start auth service on port 5002 for login*")
     
     st.stop()
 
-# Main application (user is logged in)
-# Sidebar
+# Main dashboard
 with st.sidebar:
     st.title(f"Welcome, {st.session_state.user}!")
     st.caption(f"Role: {st.session_state.role}")
     
-    # Admin API Key Section (for admins)
     if st.session_state.role == 'admin':
-        st.markdown("### Admin API Key")
-        admin_key = st.text_input(
-            "Admin API Key",
-            value=st.session_state.admin_api_key,
-            type="password",
-            help="Enter admin API key to access admin endpoints"
-        )
-        if admin_key != st.session_state.admin_api_key:
-            st.session_state.admin_api_key = admin_key
-            st.rerun()
-        
-        st.caption(f"Key: {st.session_state.admin_api_key[:8]}...")
-        st.markdown("---")
-    
-    # Check service status
-    status = check_services()
-    
-    # Navigation based on role
-    if st.session_state.role == 'admin':
-        pages = ["Song Explorer", "Century View", "Admin Dashboard", "Admin Tools"]
+        pages = ["Top Songs", "Century View", "Search", "Statistics", "Admin Panel", "System Health"]
     else:
-        pages = ["Song Explorer", "Century View"]
+        pages = ["Top Songs", "Century View", "Search", "Statistics"]
+    page = st.radio("Navigate", pages, label_visibility="collapsed")
     
-    selected_page = st.radio("Navigation", pages)
+    st.divider()
     
-    st.markdown("---")
-    
-    # View selector (for Song Explorer/Century View)
-    if selected_page in ["Song Explorer", "Century View"]:
-        st.markdown("### Select View")
-        view_options = ["Overall Top 100", "1900s Century", "2000s Century"]
-        
-        selected_view = st.radio("Music View", view_options, 
-                                index=0 if st.session_state.current_view == 'overall' 
-                                else 1 if st.session_state.current_view == '1900' 
-                                else 2)
-        
-        # Map selection to view type
-        if selected_view == "Overall Top 100":
-            st.session_state.current_view = 'overall'
-        elif selected_view == "1900s Century":
-            st.session_state.current_view = '1900'
-        elif selected_view == "2000s Century":
-            st.session_state.current_view = '2000'
-    
-    # System status
-    st.markdown("### System Status")
+    # Service status
+    services = check_services()
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("Music API", "✅" if status['music'] else "❌")
+        st.metric("Auth", "✅" if services['auth'] else "❌")
     with col2:
-        st.metric("Stats API", "✅" if status['stats'] else "❌")
+        st.metric("Music", "✅" if services['music'] else "❌")
     with col3:
-        st.metric("Auth API", "✅" if status['auth'] else "⚠️")
+        st.metric("Stats", "✅" if services['stats'] else "❌")
     
-    if not status['music']:
-        st.error("⚠️ Music service unavailable")
-    
-    st.markdown("---")
-    
-    if st.button("Logout", type="secondary"):
+    if st.button("Logout", type="secondary", use_container_width=True):
         logout()
 
-# USER VIEW: Song Explorer & Century View
-if selected_page in ["Song Explorer", "Century View"]:
-    if st.session_state.current_view == 'overall':
-        st.title("Overall Top 100 Songs")
-        st.markdown("Explore the most popular songs from all years")
-    elif st.session_state.current_view == '1900':
-        st.title("Top 100 Songs of the 1900s")
-        st.markdown("Explore the most popular songs from 1958-1999")
-    elif st.session_state.current_view == '2000':
-        st.title("Top 100 Songs of the 2000s")
-        st.markdown("Explore the most popular songs from 2000-2025")
+# Page: Top Songs
+if page == "Top Songs":
+    st.title("Top 100 Billboard Songs")
     
-    # Check service status
-    if not st.session_state.service_status['music']:
-        st.error("Music service is not available. Please start the music service on port 5000.")
-        st.info("To start the music service, run: `python music_service/app.py`")
-    else:
-        # Load songs button
-        button_label = f"Load Top 100 {st.session_state.current_view.upper() if st.session_state.current_view != 'overall' else ''}Songs"
-        if st.button(button_label, type="primary"):
-            with st.spinner(f"Loading songs for {st.session_state.current_view}..."):
-                if load_songs(view=st.session_state.current_view):
-                    st.success(f"Loaded {len(st.session_state.songs)} songs!")
-                else:
-                    st.error(f"Failed to load songs for {st.session_state.current_view}")
+    if st.button("Load Songs", type="primary"):
+        with st.spinner("Loading..."):
+            response = make_request(f"{MUSIC_URL}/songs/top100")
+            if response and response.status_code == 200:
+                data = response.json()
+                st.session_state.songs = data.get('songs', [])
+                st.success(f"Loaded {len(st.session_state.songs)} songs")
+            else:
+                st.error("Failed to load songs")
     
-    # Display songs if loaded
     if st.session_state.songs:
         songs_df = pd.DataFrame(st.session_state.songs)
         
-        # Display metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3 = st.columns(3)
         with col1:
-            st.metric("Total Songs", len(songs_df))
+            st.metric("Total", len(songs_df))
         with col2:
-            if 'year' in songs_df.columns and len(songs_df) > 0:
-                if st.session_state.current_view == '1900':
-                    year_range = "1958-1999"
-                elif st.session_state.current_view == '2000':
-                    year_range = "2000-2025"
-                else:
-                    min_year = songs_df['year'].min()
-                    max_year = songs_df['year'].max()
-                    year_range = f"{min_year}-{max_year}"
-                st.metric("Year Range", year_range)
-            else:
-                st.metric("Year Range", "N/A")
+            st.metric("Artists", songs_df['artist'].nunique())
         with col3:
-            if 'artist' in songs_df.columns and len(songs_df) > 0:
-                top_artist = songs_df['artist'].mode()[0] if len(songs_df['artist'].mode()) > 0 else "N/A"
-                st.metric("Top Artist", top_artist[:15])
-            else:
-                st.metric("Top Artist", "N/A")
-        with col4:
-            if 'popularity' in songs_df.columns or 'century_popularity' in songs_df.columns:
-                pop_col = 'century_popularity' if 'century_popularity' in songs_df.columns else 'popularity'
-                avg_popularity = songs_df[pop_col].mean() if len(songs_df) > 0 else 0
-                st.metric("Avg Popularity", f"{avg_popularity:.0f}")
-            else:
-                st.metric("Avg Popularity", "N/A")
+            st.metric("Avg Peak", f"{songs_df['peak_position'].mean():.1f}")
         
-        # Display songs
-        st.subheader(f"Top 10 Songs")
-        for idx, song in enumerate(st.session_state.songs[:10], 1):
-            with st.expander(f"#{idx}: {song.get('title', 'Unknown')}"):
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.write(f"**Artist:** {song.get('artist', 'Unknown')}")
-                    st.write(f"**Year:** {song.get('year', 'N/A')}")
-                    st.write(f"**Best Position:** #{song.get('best_position', 'N/A')}")
-                with col2:
-                    pop_value = song.get('century_popularity', song.get('popularity', 0))
-                    st.write(f"**Popularity Score:** {pop_value:.0f}")
-                    st.write(f"**Weeks on Chart:** {song.get('weeks_on_chart', 'N/A')}")
-                    if st.session_state.current_view != 'overall':
-                        st.write(f"**Appearances:** {song.get('appearances', 'N/A')}")
-        
-        # Visualizations
-        if len(songs_df) > 1:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("Artist Distribution")
-                if 'artist' in songs_df.columns:
-                    artist_counts = songs_df['artist'].value_counts().head(10)
-                    fig = px.pie(
-                        values=artist_counts.values,
-                        names=artist_counts.index,
-                        title="Top 10 Artists"
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-            
-            with col2:
-                st.subheader("Year Distribution")
-                if 'year' in songs_df.columns:
-                    year_counts = songs_df['year'].value_counts().sort_index()
-                    fig = px.bar(
-                        x=year_counts.index,
-                        y=year_counts.values,
-                        title="Songs by Year",
-                        labels={'x': 'Year', 'y': 'Number of Songs'}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-        
-        # Full table
-        with st.expander("View All Songs"):
-            display_cols = []
-            for col in ['title', 'artist', 'year', 'best_position', 'weeks_on_chart', 'popularity', 'century_popularity']:
-                if col in songs_df.columns:
-                    display_cols.append(col)
-            
-            if display_cols:
-                display_df = songs_df[display_cols]
-                st.dataframe(display_df)
-    else:
-        view_name = {
-            'overall': 'Overall Top 100',
-            '1900': '1900s Century',
-            '2000': '2000s Century'
-        }.get(st.session_state.current_view, 'Songs')
-        st.info(f"Click 'Load {view_name}' to explore music history")
+        # Display top 5 songs
+        for idx, song in enumerate(st.session_state.songs[:5]):
+            with st.expander(f"#{idx+1}: {song['title']}"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.write(f"**Artist:** {song['artist']}")
+                    st.write(f"**Peak:** #{song['peak_position']}")
+                with col_b:
+                    st.write(f"**Weeks:** {song['weeks_on_chart']}")
+                    st.write(f"**This Week:** #{song['this_week']}")
 
-# ADMIN VIEW: Admin Dashboard
-elif selected_page == "Admin Dashboard" and st.session_state.role == 'admin':
-    st.title("Admin Dashboard")
-    st.markdown("Access all admin endpoints using the admin API key")
+# Page: Century View
+elif page == "Century View":
+    st.title("Century Filtering")
     
-    # Test admin access
-    if st.button("Test Admin Access", type="primary"):
-        with st.spinner("Testing admin access..."):
-            response = make_request(f"{MUSIC_SERVICE_URL}/test/admin", use_admin_key=True)
-            
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Load 1900s Songs", use_container_width=True):
+            response = make_request(f"{MUSIC_URL}/songs/century/1900")
             if response and response.status_code == 200:
                 data = response.json()
-                st.success("Admin access successful!")
-                st.json(data)
+                st.session_state.century_data['1900'] = data.get('songs', [])
+                st.success(f"Loaded {len(st.session_state.century_data['1900'])} 1900s songs")
             else:
-                st.error("Admin access failed. Check your admin API key.")
+                st.error("Failed to load 1900s songs")
     
-    # Admin API Key Info
-    st.markdown("---")
-    st.subheader("Admin API Key Configuration")
-    col1, col2 = st.columns(2)
-    with col1:
-        st.code(f"Current Key: {st.session_state.admin_api_key}")
     with col2:
-        if st.button("Copy to Clipboard"):
-            st.code("Copied!")
-    
-    # Admin Endpoints Explorer
-    st.markdown("---")
-    st.subheader("Admin Endpoints Explorer")
-    
-    if st.button("List All Endpoints", type="secondary"):
-        with st.spinner("Fetching endpoints..."):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/endpoints", use_admin_key=True)
-            
+        if st.button("Load 2000s Songs", use_container_width=True):
+            response = make_request(f"{MUSIC_URL}/songs/century/2000")
             if response and response.status_code == 200:
-                endpoints = response.json()
-                
-                # Public endpoints
-                st.markdown("### Public Endpoints")
-                public_df = pd.DataFrame([
-                    {"Method": "GET", "Endpoint": endpoint, "Description": desc}
-                    for endpoint, desc in endpoints.get('public_endpoints', {}).items()
-                ])
-                st.dataframe(public_df, use_container_width=True)
-                
-                # Admin endpoints
-                st.markdown("### Admin Endpoints (Require X-Admin-Key)")
-                admin_df = pd.DataFrame([
-                    {"Method": endpoint.split()[0], "Endpoint": endpoint.split()[1], "Description": desc}
-                    for endpoint, desc in endpoints.get('admin_endpoints', {}).items()
-                ])
-                st.dataframe(admin_df, use_container_width=True)
+                data = response.json()
+                st.session_state.century_data['2000'] = data.get('songs', [])
+                st.success(f"Loaded {len(st.session_state.century_data['2000'])} 2000s songs")
             else:
-                st.error("Failed to fetch endpoints")
+                st.error("Failed to load 2000s songs")
     
-    # Admin Tools Section
-    st.markdown("---")
+    tab1, tab2 = st.tabs(["1900s (1958-1999)", "2000s (2000-present)"])
+    
+    with tab1:
+        if st.session_state.century_data['1900']:
+            songs_df = pd.DataFrame(st.session_state.century_data['1900'])
+            st.subheader(f"1900s Songs: {len(songs_df)} unique")
+            st.write(f"**Sample Songs:**")
+            for song in st.session_state.century_data['1900'][:3]:
+                st.write(f"- {song['title']} by {song['artist']} (Peak: #{song['peak_position']})")
+        else:
+            st.info("Load 1900s songs to see data")
+    
+    with tab2:
+        if st.session_state.century_data['2000']:
+            songs_df = pd.DataFrame(st.session_state.century_data['2000'])
+            st.subheader(f"2000s Songs: {len(songs_df)} unique")
+            st.write(f"**Sample Songs:**")
+            for song in st.session_state.century_data['2000'][:3]:
+                st.write(f"- {song['title']} by {song['artist']} (Peak: #{song['peak_position']})")
+        else:
+            st.info("Load 2000s songs to see data")
+
+# Page: Search
+elif page == "Search":
+    st.title("Search Songs")
+    
+    query = st.text_input("Search by title or artist:")
+    
+    if query and len(query) >= 2:
+        response = make_request(f"{MUSIC_URL}/songs/search", params={'q': query})
+        if response and response.status_code == 200:
+            results = response.json().get('results', [])
+            if results:
+                st.success(f"Found {len(results)} results")
+                for song in results[:5]:
+                    st.write(f"**{song['title']}** - *{song['artist']}*")
+                    st.write(f"Peak: #{song['peak_position']} | Weeks: {song['weeks_on_chart']}")
+                    st.divider()
+            else:
+                st.info("No results found")
+
+# Page: Statistics
+elif page == "Statistics":
+    st.title("Usage Statistics")
+    
+    if st.button("Load Statistics", type="primary"):
+        response = make_request(f"{STATS_URL}/admin/statistics")
+        if response and response.status_code == 200:
+            stats = response.json()
+            st.session_state.stats = stats
+            st.success("Statistics loaded")
+        else:
+            st.error("Failed to load statistics")
+    
+    if hasattr(st.session_state, 'stats') and st.session_state.stats:
+        stats = st.session_state.stats
+        
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Total Events", stats['summary']['total_events'])
+        col2.metric("Unique Users", stats['summary']['unique_users'])
+        col3.metric("Unique Endpoints", stats['summary']['unique_endpoints'])
+        col4.metric("Uptime (hrs)", f"{stats['summary']['uptime_hours']:.1f}")
+
+# Page: Admin
+elif page == "Admin" and st.session_state.role == 'admin':
+    st.title("Admin Panel")
+    
+    if st.button("Reload All Songs", type="primary"):
+        response = make_request(f"{MUSIC_URL}/admin/reload", method='POST')
+        if response and response.status_code == 200:
+            st.success("Songs reloaded successfully")
+        else:
+            st.error("Failed to reload songs")
+    
+    if st.button("Reset Statistics", type="secondary"):
+        response = make_request(f"{STATS_URL}/test/reset", method='POST')
+        if response and response.status_code == 200:
+            st.success("Statistics reset")
+        else:
+            st.error("Failed to reset statistics")
+
+elif page == "System Health" and st.session_state.role == 'admin':
+    st.title("System Health Dashboard")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("Check All Services", type="primary"):
+            with st.spinner("Checking services..."):
+                # Check auth service
+                auth_response = requests.get(f"{AUTH_URL}/health", timeout=5)
+                auth_ok = auth_response.status_code == 200
+                
+                # Check music service  
+                music_response = requests.get(f"{MUSIC_URL}/health", timeout=5)
+                music_ok = music_response.status_code == 200
+                
+                # Check stats service
+                stats_response = requests.get(f"{STATS_URL}/health", timeout=5)
+                stats_ok = stats_response.status_code == 200
+                
+                st.success("Health checks completed")
+                
+                # Display results
+                status_col1, status_col2, status_col3 = st.columns(3)
+                with status_col1:
+                    st.metric("Auth Service", "✅" if auth_ok else "❌")
+                with status_col2:
+                    st.metric("Music Service", "✅" if music_ok else "❌")
+                with status_col3:
+                    st.metric("Stats Service", "✅" if stats_ok else "❌")
+    
+    with col2:
+        if st.button("Test Admin Access", type="secondary"):
+            response = make_request(f"{AUTH_URL}/auth/test/admin")
+            if response and response.status_code == 200:
+                st.success("✅ Admin access confirmed")
+                st.json(response.json())
+            else:
+                st.error("❌ Admin access failed")
+    
+    # System metrics
     st.subheader("Admin Tools")
     
-    col1, col2, col3 = st.columns(3)
+    tab1, tab2, tab3 = st.tabs(["User Management", "System Logs", "Security"])
     
-    with col1:
-        if st.button("System Stats"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/system-stats", use_admin_key=True)
+    with tab1:
+        if st.button("List All Users"):
+            response = make_request(f"{AUTH_URL}/auth/admin/users")
             if response and response.status_code == 200:
-                data = response.json()
-                st.json(data)
-    
-    with col2:
-        if st.button("Song Analytics"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/song-analytics", use_admin_key=True)
-            if response and response.status_code == 200:
-                data = response.json()
-                st.json(data)
-    
-    with col3:
-        if st.button("All Songs"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/all-songs", use_admin_key=True)
-            if response and response.status_code == 200:
-                data = response.json()
-                st.info(f"Total songs: {data.get('count', 0)}")
-                if data.get('songs'):
-                    st.dataframe(pd.DataFrame(data['songs']).head(20))
-    
-    # Year Analysis Section
-    st.markdown("---")
-    st.subheader("Year Analysis")
-    
-    # Get available years
-    if st.button("Load Available Years"):
-        with st.spinner("Loading years..."):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/years", use_admin_key=True)
-            
-            if response and response.status_code == 200:
-                data = response.json()
-                years = data.get('available_years', [])
-                
-                if years:
-                    selected_year = st.selectbox("Select Year for Analysis", years)
-                    
-                    if st.button(f"Analyze {selected_year}"):
-                        with st.spinner(f"Loading songs for {selected_year}..."):
-                            if load_songs(view='year', year=selected_year):
-                                songs_df = pd.DataFrame(st.session_state.songs)
-                                
-                                st.success(f"Loaded {len(songs_df)} songs from {selected_year}")
-                                
-                                # Display metrics
-                                col1, col2, col3 = st.columns(3)
-                                with col1:
-                                    st.metric("Total Songs", len(songs_df))
-                                with col2:
-                                    if len(songs_df) > 0:
-                                        avg_pop = songs_df['year_popularity'].mean()
-                                        st.metric("Avg Popularity", f"{avg_pop:.0f}")
-                                with col3:
-                                    if len(songs_df) > 0:
-                                        top_song = songs_df.iloc[0]
-                                        st.metric("Top Song", top_song['title'][:15])
-                                
-                                # Display top 5 songs
-                                st.subheader(f"Top 5 Songs of {selected_year}")
-                                for idx, song in enumerate(st.session_state.songs[:5], 1):
-                                    st.write(f"{idx}. **{song['title']}** - {song['artist']} (Popularity: {song['year_popularity']:.0f})")
-                else:
-                    st.warning("No year data available")
+                users_data = response.json()
+                st.write(f"**Total Users:** {users_data['count']}")
+                for user in users_data['users']:
+                    with st.expander(f"👤 {user['username']} ({user['role']})"):
+                        st.write(f"**Role:** {user['role']}")
+                        st.write(f"**Permissions:** {', '.join(user['permissions'])}")
+                        st.write(f"**Created:** {user['created_at']}")
             else:
-                st.error("Failed to load year data")
+                st.error("Failed to fetch users")
     
-    # Century Comparison
-    st.markdown("---")
-    st.subheader("Century Comparison")
+    with tab2:
+        if st.button("View System Logs"):
+            st.info("System logs would be displayed here")
+            st.code("""
+            [2025-01-15 10:30:45] INFO: Admin user 'admin' accessed statistics
+            [2025-01-15 10:31:12] INFO: User 'user' loaded 1900s songs
+            [2025-01-15 10:32:05] INFO: Stats service processed 150 events
+            """)
     
-    if st.button("Compare Centuries"):
-        with st.spinner("Loading century comparison..."):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/centuries/comparison", use_admin_key=True)
-            
+    with tab3:
+        st.write("**Security Settings**")
+        if st.button("Reset Statistics Database"):
+            response = make_request(f"{STATS_URL}/admin/reset", method='POST')
             if response and response.status_code == 200:
-                data = response.json()
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("1900s Songs", data['century_1900']['song_count'])
-                with col2:
-                    st.metric("2000s Songs", data['century_2000']['song_count'])
-                
-                # Comparison chart
-                fig = go.Figure(data=[
-                    go.Bar(name='1900s', x=['Popularity'], y=[data['century_1900']['avg_popularity']]),
-                    go.Bar(name='2000s', x=['Popularity'], y=[data['century_2000']['avg_popularity']])
-                ])
-                fig.update_layout(title='Average Popularity by Century', barmode='group')
-                st.plotly_chart(fig, use_container_width=True)
-
-# ADMIN VIEW: Admin Tools
-elif selected_page == "Admin Tools" and st.session_state.role == 'admin':
-    st.title("Admin Tools")
-    st.markdown("Advanced administrative functions")
-    
-    # Debug Tools
-    st.subheader("Debug Tools")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("Debug Data"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/debug/data", use_admin_key=True)
-            if response and response.status_code == 200:
+                st.success("✅ Statistics reset successfully")
                 st.json(response.json())
-    
-    with col2:
-        if st.button("MongoDB Structure"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/debug/mongodb-structure", use_admin_key=True)
+            else:
+                st.error("❌ Failed to reset statistics")
+        
+        if st.button("Reset User Database"):
+            response = make_request(f"{AUTH_URL}/auth/admin/reset", method='POST')
             if response and response.status_code == 200:
+                st.success("✅ Users reset to initial state")
                 st.json(response.json())
-    
-    # System Management
-    st.subheader("System Management")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("Reload Songs", type="primary"):
-            response = make_request(f"{MUSIC_SERVICE_URL}/admin/reload-songs", method='POST', use_admin_key=True)
-            if response and response.status_code == 200:
-                data = response.json()
-                st.success(f"{data.get('message', 'Songs reloaded')}")
-                st.info(f"Total songs: {data.get('total_songs', 0)}")
-    
-    with col2:
-        if st.button("Test All Services"):
-            status = check_services()
-            st.success(f"Music: {'✅' if status['music'] else '❌'}")
-            st.success(f"Stats: {'✅' if status['stats'] else '❌'}")
-            st.success(f"Auth: {'✅' if status['auth'] else '❌'}")
-
-# Footer
-st.sidebar.markdown("---")
-st.sidebar.markdown(
-    """
-    **Music Museum Dashboard**
-    
-    Features:
-    - Century Views (1900s/2000s)
-    - Admin Dashboard with API Key
-    - Admin Tools
-    
-    Admin API Key: Required for admin endpoints
-    """
-)
+            else:
+                st.error("❌ Failed to reset users")
